@@ -1,0 +1,63 @@
+name: Build containers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+  
+env:
+  GODOT_FORK_URL: https://github.com/IdleClover/godot-fork
+  GODOT_FORK_DIR: /tmp/godot-fork
+  BUILD_CONTAINERS_URL: https://github.com/godotengine/build-containers
+  BUILD_CONTAINERS_DIR: /tmp/build-containers
+  REGISTRY: ghcr.io/idleclover
+  FEDORA: f43
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone godot-fork without checkout
+        run: git clone --no-checkout ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
+
+      - name: Collect versions
+        id: collect
+        run: |
+          BRANCHES=$(git -C ${{ env.GODOT_FORK_DIR }} branch -r | grep -v 'upstream/')
+
+          VERSIONS_DONE=""
+          for BRANCH in $BRANCHES; do
+            git -C ${{ env.GODOT_FORK_DIR }} checkout $BRANCH -- version.py
+            #VERSION=$(cd ${{ env.GODOT_FORK_DIR }} && python3 -c "from version import *; print(f'{major}.{minor}')")
+            VERSION=$(cd ${{ env.GODOT_FORK_DIR }} && python3 -c "from version import *; print(docs)")
+
+            if echo "$VERSIONS_DONE" | grep -q "$VERSION"; then
+              continue
+            fi
+
+            IMAGE="${{ env.REGISTRY }}/godot-linux:$VERSION"
+            if docker manifest inspect $IMAGE > /dev/null 2>&1; then
+              echo "$VERSION already found, skip"
+              continue
+            fi
+
+            VERSIONS_DONE="$VERSIONS_DONE $VERSION"
+
+            git clone --depth 1 --branch $VERSION ${{ env.BUILD_CONTAINERS_URL }} ${{ env.BUILD_CONTAINERS_DIR}}-$VERSION \
+              || git clone --depth 1 --branch main ${{ env.BUILD_CONTAINERS_URL }} ${{ env.BUILD_CONTAINERS_DIR}}-$VERSION # Fallback to main
+
+            cd ${{ env.BUILD_CONTAINERS_DIR}}-$VERSION
+            bash build.sh $VERSION ${{ env.FEDORA }} || true # It will crash because of MacOS & iOS
+
+            podman push godot-linux:$VERSION-${{ env.FEDORA }} $IMAGE
+            podman push godot-windows:$VERSION-${{ env.FEDORA }} ${{ env.REGISTRY }}/godot-windows:$VERSION
+            podman push godot-web:$VERSION-${{ env.FEDORA }} ${{ env.REGISTRY }}/godot-web:$VERSION
+            podman push godot-android:$VERSION-${{ env.FEDORA }} ${{ env.REGISTRY }}/godot-android:$VERSION
+          done
