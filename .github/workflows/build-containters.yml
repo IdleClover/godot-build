@@ -6,7 +6,6 @@ on:
     - cron: '0 2 * * *'
   
 env:
-  GITHUB_ACCESS: https://x-access-token:${{ secrets.GITHUB_TOKEN }}
   GODOT_FORK_URL: https://github.com/IdleClover/godot-fork
   GODOT_FORK_DIR: /tmp/godot-fork
   BUILD_CONTAINERS_URL: https://github.com/godotengine/build-containers
@@ -26,7 +25,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone godot-fork without checkout
-        run: git clone --no-checkout ${{ env.GITHUB_ACCESS }}:${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
+        run: git clone --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}:${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
 
       - name: Collect versions
         id: collect
