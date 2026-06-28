@@ -6,7 +6,7 @@ on:
     - cron: '0 2 * * *'
   
 env:
-  GODOT_FORK_URL: github.com/IdleClover/godot-fork
+  GODOT_FORK_URL: git@github.com:IdleClover/godot-fork
   GODOT_FORK_DIR: /tmp/godot-fork
   BUILD_CONTAINERS_URL: https://github.com/godotengine/build-containers
   BUILD_CONTAINERS_DIR: /tmp/build-containers
@@ -17,6 +17,11 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GODOT_FORK_DEPLOY_KEY }}
+
       - name: Login ghcr.io
         uses: docker/login-action@v3
         with:
@@ -25,7 +30,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone godot-fork without checkout
-        run: git clone --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
+        run: git clone --no-checkout ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
 
       - name: Collect versions
         id: collect
