@@ -122,7 +122,7 @@ jobs:
             -v ${{ env.TEMPLATES_DIR }}:/out                        \
             -w /godot                                               \
             ${{ env.REGISTRY }}/godot-windows:${{ matrix.version }} \
-            bash -c 'python misc/scripts/install_d3d12_sdk_windows.py && scons platform=windows target=template_release production=yes $PROFILE $BUILD_PROFILE && cp -R bin/* /out'
+            bash -c 'python3 misc/scripts/install_d3d12_sdk_windows.py && scons platform=windows target=template_release production=yes $PROFILE $BUILD_PROFILE && cp -R bin/* /out'
           
           # Android
           docker run --rm \
@@ -132,7 +132,7 @@ jobs:
             -v ${{ env.TEMPLATES_DIR }}:/out                        \
             -w /godot                                               \
             ${{ env.REGISTRY }}/godot-android:${{ matrix.version }} \
-            bash -c 'python misc/scripts/install_swappy_android.py && scons platform=android target=template_release production=yes $PROFILE $BUILD_PROFILE swappy=yes generate_apk=yes && cp -R bin/* /out'
+            bash -c 'python3 misc/scripts/install_swappy_android.py && scons platform=android target=template_release production=yes $PROFILE $BUILD_PROFILE swappy=yes generate_apk=yes && cp -R bin/* /out'
           # Don't forget generate_apk=yes to the LAST architecture I'm building 
           
           # Web
