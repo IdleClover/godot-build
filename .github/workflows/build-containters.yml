@@ -30,12 +30,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone godot-fork without checkout
-        run: git clone --no-checkout ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
+        run: git clone --depth 1 --no-single-branch --no-checkout ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
 
       - name: Collect versions
         id: collect
         run: |
-          BRANCHES=$(git -C ${{ env.GODOT_FORK_DIR }} branch -r | grep -v 'upstream/')
+          BRANCHES=$(git -C ${{ env.GODOT_FORK_DIR }} branch -r | grep -v 'upstream/' | grep -v '\->')
 
           VERSIONS_DONE=""
           for BRANCH in $BRANCHES; do
