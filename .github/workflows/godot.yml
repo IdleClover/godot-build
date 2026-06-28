@@ -1,0 +1,159 @@
+name: Build godot
+
+on:
+  workflow_dispatch:
+
+env:
+  GODOT_FORK_URL: git@github.com:IdleClover/godot-fork
+  GODOT_FORK_DIR: /tmp/godot-fork
+  REGISTRY: ghcr.io/idleclover
+  TEMPLATES_DIR: /tmp/output/templates
+  EDITORS_DIR: /tmp/output/editors
+  PROFILE_FILE: profile.py
+  BUILD_PROFILE_FILE: profile.build
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.collect.outputs.matrix }}
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GODOT_FORK_DEPLOY_KEY }}
+
+      - name: Clone godot-fork without checkout
+        run: git clone --depth 1 --no-single-branch --no-checkout ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR }}
+      
+      - name: Collect branch to rebuild
+        id: collect
+        run: |
+          BRANCHES=$(git -C ${{ env.GODOT_FORK_DIR }} branch -r | grep -v 'upstream/' | grep -v '\->')
+          
+          MATRIX="[]"
+          for BRANCH in $BRANCHES; do
+            git -C ${{ env.GODOT_FORK_DIR }} checkout $BRANCH -- version.py
+            VERSION=$(cd ${{ env.GODOT_FORK_DIR }} && python3 -c "from version import *; print(docs)")
+            CURRENT_COMMIT=$(git -C ${{ env.GODOT_FORK_DIR }} rev-parse $BRANCH)
+
+            IMAGE_COMMIT=$(docker manifest inspect ${{ env.REGISTRY }}/godot-$BRANCH:latest 2>/dev/null \
+              | jq -r '.annotations["org.opencontainers.image.revision"]' 2>/dev/null || echo "none")
+
+            if [ "$CURRENT_COMMIT" != "$IMAGE_COMMIT" ]; then
+              MATRIX=$(echo $MATRIX | jq                             \
+                --arg branch "$(echo "$BRANCH" | sed 's|origin/||')" \
+                --arg version "$VERSION"                             \
+                --arg commit "$CURRENT_COMMIT"                       \
+                '. += [{"branch": $branch, "version": $version, "commit": $commit}]')
+            fi
+          done
+
+          echo "matrix=$(echo $MATRIX | jq -c .)" >> $GITHUB_OUTPUT
+  
+  build:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GODOT_FORK_DEPLOY_KEY }}
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v4
+
+      - name: Clone branch
+        run: git clone --depth 1 --branch ${{ matrix.branch }} ${{ env.GODOT_FORK_URL }} ${{ env.GODOT_FORK_DIR}}
+
+      - name: Compile Godot
+        run: |
+          mkdir -p ${{ env.TEMPLATES_DIR }}
+          mkdir -p ${{ env.EDITORS_DIR }}
+        
+          PROFILE=""
+          BUILD_PROFILE=""
+
+          if [ -f ${{ env.GODOT_FORK_DIR }}/${{ env.PROFILE_FILE }} ]; then
+            PROFILE="profile=${{ env.PROFILE_FILE }}"
+          fi
+
+          if [ -f ${{ env.GODOT_FORK_DIR }}/${{ env.BUILD_PROFILE_FILE }} ]; then
+            BUILD_PROFILE="build_profile=${{ env.BUILD_PROFILE_FILE }}"
+          fi
+
+          #--  EDITORS  --#
+          # Linux
+          docker run --rm \
+            -e PROFILE="$PROFILE"                                 \
+            -e BUILD_PROFILE="$BUILD_PROFILE"                     \
+            -v ${{ env.GODOT_FORK_DIR}}:/godot                    \
+            -v ${{ env.EDITORS_DIR }}:/out                        \
+            -w /godot                                             \
+            ${{ env.REGISTRY }}/godot-linux:${{ matrix.version }} \
+            bash -c 'PATH=$GODOT_SDK_LINUX_X86_64/bin:$PATH && scons platform=linuxbsd target=editor production=yes $PROFILE $BUILD_PROFILE && cp -R bin/* /out'
+
+          #-- TEMPLATES --#
+          # Linux
+          docker run --rm \
+            -e PROFILE="$PROFILE"                                 \
+            -e BUILD_PROFILE="$BUILD_PROFILE"                     \
+            -v ${{ env.GODOT_FORK_DIR}}:/godot                    \
+            -v ${{ env.TEMPLATES_DIR }}:/out                      \
+            -w /godot                                             \
+            ${{ env.REGISTRY }}/godot-linux:${{ matrix.version }} \
+            bash -c 'PATH=$GODOT_SDK_LINUX_X86_64/bin:$PATH && scons platform=linuxbsd target=template_release production=yes $PROFILE $BUILD_PROFILE && cp -R bin/* /out'
+          
+          # Windows
+          docker run --rm \
+            -e PROFILE="$PROFILE"                                   \
+            -e BUILD_PROFILE="$BUILD_PROFILE"                       \
+            -v ${{ env.GODOT_FORK_DIR}}:/godot                      \
+            -v ${{ env.TEMPLATES_DIR }}:/out                        \
+            -w /godot                                               \
+            ${{ env.REGISTRY }}/godot-windows:${{ matrix.version }} \
+            bash -c 'python misc/scripts/install_d3d12_sdk_windows.py && scons platform=windows target=template_release production=yes $PROFILE $BUILD_PROFILE && cp -R bin/* /out'
+          
+          # Android
+          docker run --rm \
+            -e PROFILE="$PROFILE"                                   \
+            -e BUILD_PROFILE="$BUILD_PROFILE"                       \
+            -v ${{ env.GODOT_FORK_DIR}}:/godot                      \
+            -v ${{ env.TEMPLATES_DIR }}:/out                        \
+            -w /godot                                               \
+            ${{ env.REGISTRY }}/godot-android:${{ matrix.version }} \
+            bash -c 'python misc/scripts/install_swappy_android.py && scons platform=android target=template_release production=yes $PROFILE $BUILD_PROFILE swappy=yes generate_apk=yes && cp -R bin/* /out'
+          # Don't forget generate_apk=yes to the LAST architecture I'm building 
+          
+          # Web
+          docker run --rm \
+            -e PROFILE="$PROFILE"                                   \
+            -e BUILD_PROFILE="$BUILD_PROFILE"                       \
+            -v ${{ env.GODOT_FORK_DIR}}:/godot                      \
+            -v ${{ env.TEMPLATES_DIR }}:/out                        \
+            -w /godot                                               \
+            ${{ env.REGISTRY }}/godot-web:${{ matrix.version }} \
+            bash -c 'source /root/emsdk/emsdk_env.sh && scons platform=web target=template_release production=yes $PROFILE $BUILD_PROFILE threads=no dlink_enabled=yes && mv bin/godot.web.template_release.wasm32.nothreads.dlink.zip bin/web_dlink_nothreads_release.zip && cp -R bin/* /out'
+      
+      - name: Build and push final image
+        run: |
+          docker build \
+            --build-arg GODOT_VERSION=${{ matrix.version }}                  \
+            --build-arg EDITORS_DIR=${{ env.EDITORS_DIR }}                   \
+            --build-arg TEMPLATES_DIR=${{ env.TEMPLATES_DIR }}               \
+            --label "org.opencontainers.image.revision=${{ matrix.commit }}" \
+            -t ${{ env.REGISTRY }}/${{ matrix.branch }}:latest               \
+            -f Dockerfile                                                    \
+            /tmp/output
+          
+          docker push ${{ env.REGISTRY }}/${{ matrix.branch }}:latest
