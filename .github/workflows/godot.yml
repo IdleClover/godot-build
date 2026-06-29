@@ -149,8 +149,8 @@ jobs:
         run: |
           docker build \
             --build-arg GODOT_VERSION=${{ matrix.version }}                  \
-            --build-arg EDITORS_DIR=${{ env.EDITORS_DIR }}                   \
-            --build-arg TEMPLATES_DIR=${{ env.TEMPLATES_DIR }}               \
+            --build-arg EDITORS_DIR=editors                                  \
+            --build-arg TEMPLATES_DIR=templates                              \
             --label "org.opencontainers.image.revision=${{ matrix.commit }}" \
             -t ${{ env.REGISTRY }}/${{ matrix.branch }}:latest               \
             -f Dockerfile                                                    \
